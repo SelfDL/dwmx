@@ -15,6 +15,7 @@ This plugin extends Steams window support to add other Windows 11 features like:
 ## Supported Themes
 
 * [Fluenty](https://steambrew.app/fluenty-steam)
+* [SpaceTheme for Steam](https://steambrew.app/theme?id=zQndv1rI0FXLh3QTRgOL)
 
 
 ## Roadmap
