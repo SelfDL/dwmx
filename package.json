@@ -11,7 +11,7 @@
   "author": "shdwmtr",
   "license": "MIT",
   "dependencies": {
-    "@steambrew/client": "^4.2.1",
-    "@steambrew/ttc": "^1.0.5"
+    "@steambrew/client": "^5.5.14",
+    "@steambrew/ttc": "^2.7.5"
   }
 }
