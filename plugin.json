@@ -1,8 +1,9 @@
 {
-    "$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/sys/plugin-schema.json",
-    "common_name": "Mica & Acrylic for Steam",
-    "name": "dwmx",
-    "description": "Enable custom window backdrops on supporting themes.",
-    "backend": "src",
-    "frontend": "steam"
+  "$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/sys/plugin-schema.json",
+  "common_name": "Window Styler (DWMX)",
+  "name": "dwmx",
+  "description": "Enable custom window backdrops on supporting themes.",
+  "backend": "src",
+  "frontend": "steam",
+  "backendType": "lua"
 }
