@@ -3,6 +3,11 @@ local millennium = require("millennium")
 
 local ffi = require("ffi")
 
+
+-- CHANGE: unsigned long is 32-bit on Windows x64 (LLP64); uintptr_t/intptr_t
+-- correctly resolves to 64-bit, matching the actual PROCESSENTRY32W struct layout.
+-- Using the wrong width causes the struct fields after th32DefaultHeapID to be
+-- misaligned, which leads to reading garbage PIDs and eventual access violations.
 ffi.cdef[[
 typedef int BOOL;
 typedef unsigned long DWORD;
@@ -12,8 +17,8 @@ typedef void* HANDLE;
 typedef void* HWND;
 typedef const wchar_t* LPCWSTR;
 typedef wchar_t WCHAR;
-typedef unsigned long ULONG_PTR;
-typedef long LONG_PTR;
+typedef uintptr_t ULONG_PTR;
+typedef intptr_t LONG_PTR;
 typedef LONG_PTR LPARAM;
 typedef unsigned int UINT;
 typedef long HRESULT;
@@ -89,6 +94,11 @@ local current_target_pids = {}
 -- Single reusable callback - created once and reused
 local window_enum_callback = nil
 
+-- CHANGE: pre-allocate the PID output buffer used inside the enum callback.
+-- Allocating with ffi.new() inside an FFI callback on every window invocation
+-- hammers the GC while executing from C, which is a stability hazard.
+local g_pid_buf = ffi.new("DWORD[1]")
+
 -- cast wchar to utf8 string. 
 -- 260 == MAX_PATH, we assume steam is not running from a path longer than that.
 -- that is likely a safe assumption (I hope).
@@ -103,7 +113,10 @@ end
 local function find_pids_by_name(exe_name)
     local pids = {}
     local snap = C.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snap == ffi.cast("HANDLE", -1) then
+    -- CHANGE: cast through intptr_t so the sentinel is sign-extended to 64-bit
+    -- (0xFFFFFFFFFFFFFFFF), matching INVALID_HANDLE_VALUE on x64. A bare cast of
+    -- -1 to void* is not guaranteed to produce the correct pointer value.
+    if snap == ffi.cast("HANDLE", ffi.cast("intptr_t", -1)) then
         logger:error("CreateToolhelp32Snapshot failed")
         return pids
     end
@@ -143,13 +156,11 @@ local function EnableBlurBehind(hwnd)
     data.pData = ffi.cast("void*", ffi.cast("ACCENTPOLICY*", policy))
     data.ulDataSize = ffi.sizeof(policy)
 
-    local ok
-    local s, fn = pcall(function() return user32.SetWindowCompositionAttribute end)
-    if s and fn ~= nil then
-        ok = fn(hwnd, data)
-    else
-        ok = C.SetWindowCompositionAttribute(hwnd, data)
-    end
+    -- CHANGE: removed the pcall/fallback that called C.SetWindowCompositionAttribute.
+    -- ffi.C resolves to the CRT (msvcrt/ucrtbase), not user32 — calling a user32
+    -- symbol through it produces a bad function pointer and causes an access violation.
+    -- SetWindowCompositionAttribute belongs to user32, so call it directly from there.
+    local ok = user32.SetWindowCompositionAttribute(hwnd, data)
     return ok ~= 0
 end
 
@@ -174,9 +185,9 @@ local function init_window_enum_callback()
     if window_enum_callback then return end
 
     window_enum_callback = ffi.cast("WNDENUMPROC", function(hwnd, lParam)
-        local out = ffi.new("DWORD[1]")
-        C.GetWindowThreadProcessId(hwnd, out)
-        local window_pid = tonumber(out[0])
+        -- CHANGE: use the pre-allocated g_pid_buf instead of ffi.new("DWORD[1]") here.
+        C.GetWindowThreadProcessId(hwnd, g_pid_buf)
+        local window_pid = tonumber(g_pid_buf[0])
         for _, target_pid in ipairs(current_target_pids) do
             if window_pid == target_pid then
                 local ok, err = pcall(PatchWindowContext, hwnd)
@@ -216,7 +227,11 @@ end
 
 local function on_unload()
     logger:info("Plugin unloaded")
-    -- Clean up callback if needed (though FFI callbacks are GC'd automatically)
+    -- CHANGE: explicitly free the FFI trampoline before clearing the reference.
+    -- Without :free(), unloading and reloading the plugin leaks the native stub.
+    if window_enum_callback then
+        window_enum_callback:free()
+    end
     window_enum_callback = nil
     current_target_pids = {}
 end
